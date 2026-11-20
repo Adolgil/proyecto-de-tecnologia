@@ -1,0 +1,99 @@
+﻿<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Generador de Recetas con IA</title>
+  <link rel="icon" type="image/x-icon" href="/static/favicon.ico" />
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 850px; margin: 24px auto; padding: 0 16px; background: #f7f9fc; }
+    .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 14px; margin-bottom: 14px; }
+    input, select, button { padding: 7px 10px; margin: 3px 0; border-radius: 6px; border: 1px solid #cbd5e1; }
+    button { background: #2563eb; color: #fff; border: none; cursor: pointer; font-weight: bold; }
+    button.danger { background: #dc2626; }
+    button.secondary { background: #0f766e; }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <h1>Generador de Recetas con Inventario e IA</h1>
+  <div id="auth-card" class="card">
+    <h2>Registro / Inicio de Sesion</h2>
+    <input id="email" type="email" placeholder="correo@ejemplo.com" />
+    <input id="password" type="password" placeholder="contrasena" />
+    <button onclick="auth('register')">Registrarse</button>
+    <button class="secondary" onclick="auth('login')">Iniciar Sesion</button>
+    <p id="auth-msg"></p>
+  </div>
+  <div id="app-box" class="hidden">
+    <div class="card"><button class="danger" onclick="logout()">Cerrar Sesion</button></div>
+    <div class="card">
+      <h2>Inventario</h2>
+      <input id="ing-nombre" placeholder="Ingrediente" />
+      <input id="ing-cantidad" placeholder="Cantidad" />
+      <button onclick="addIng()">Agregar</button>
+      <ul id="lista-ing"></ul>
+      <button class="secondary" onclick="genReceta()">Generar Receta con IA</button>
+      <p id="gen-msg"></p>
+    </div>
+    <div class="card"><h2>Historial de Recetas</h2><div id="lista-rec"></div></div>
+  </div>
+  <script>
+    let token = localStorage.getItem("token") || "";
+    const hdr = () => ({ "Authorization": "Bearer " + token, "Content-Type": "application/json" });
+    function syncUI() {
+      document.getElementById("auth-card").classList.toggle("hidden", Boolean(token));
+      document.getElementById("app-box").classList.toggle("hidden", !token);
+      if (token) { loadIng(); loadRec(); }
+    }
+    async function auth(mode) {
+      const email = document.getElementById("email").value.trim();
+      const password = document.getElementById("password").value;
+      const res = mode === "register"
+        ? await fetch("/auth/register", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, password }) })
+        : await fetch("/auth/login", { method: "POST", body: new URLSearchParams({ username: email, password }) });
+      const data = await res.json();
+      if (!res.ok) { document.getElementById("auth-msg").textContent = data.detail || "Error"; return; }
+      token = data.access_token; localStorage.setItem("token", token); syncUI();
+    }
+    function logout() { token = ""; localStorage.removeItem("token"); syncUI(); }
+    async function loadIng() {
+      const items = await (await fetch("/ingredientes", { headers: hdr() })).json();
+      const ul = document.getElementById("lista-ing"); ul.innerHTML = "";
+      items.forEach(i => { ul.innerHTML += `<li>${i.nombre} (${i.cantidad}) <button class="danger" onclick="delIng(${i.id})">X</button></li>`; });
+    }
+    async function addIng() {
+      const nombre = document.getElementById("ing-nombre").value.trim(), cantidad = document.getElementById("ing-cantidad").value.trim();
+      if (!nombre || !cantidad) return;
+      await fetch("/ingredientes", { method: "POST", headers: hdr(), body: JSON.stringify({ nombre, cantidad }) });
+      document.getElementById("ing-nombre").value = ""; document.getElementById("ing-cantidad").value = ""; loadIng();
+    }
+    async function delIng(id) { await fetch("/ingredientes/" + id, { method: "DELETE", headers: hdr() }); loadIng(); }
+    async function genReceta() {
+      document.getElementById("gen-msg").textContent = "Generando...";
+      const res = await fetch("/recetas/generar", { method: "POST", headers: hdr() });
+      const data = await res.json();
+      document.getElementById("gen-msg").textContent = res.ok ? "Creada: " + data.nombre_plato : (data.detail || "Error");
+      if (res.ok) loadRec();
+    }
+    async function loadRec() {
+      const recetas = await (await fetch("/recetas", { headers: hdr() })).json();
+      const box = document.getElementById("lista-rec"); box.innerHTML = "";
+      recetas.forEach(r => {
+        const cal = r.calificaciones.map(c => c.puntuacion + "*").join(", ") || "Sin calificar";
+        box.innerHTML += `<div class="card"><h3>${r.nombre_plato} (${r.dificultad} - ${r.tiempo_estimado})</h3>
+          <p><b>Calificaciones:</b> ${cal}</p><p><b>Ingredientes:</b> ${r.ingredientes.join(", ")}</p>
+          <ol>${r.pasos_preparacion.map(p => "<li>" + p + "</li>").join("")}</ol>
+          <select id="sel-${r.id}"><option value="5">5</option><option value="4">4</option><option value="3">3</option><option value="2">2</option><option value="1">1</option></select>
+          <button onclick="rateRec(${r.id})">Calificar</button>
+          <button class="danger" onclick="delRec(${r.id})">Eliminar</button></div>`;
+      });
+    }
+    async function rateRec(id) {
+      await fetch(`/recetas/${id}/calificar`, { method: "POST", headers: hdr(), body: JSON.stringify({ puntuacion: +document.getElementById("sel-" + id).value }) });
+      loadRec();
+    }
+    async function delRec(id) { await fetch("/recetas/" + id, { method: "DELETE", headers: hdr() }); loadRec(); }
+    syncUI();
+  </script>
+</body>
+</html>

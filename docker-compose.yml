@@ -1,0 +1,13 @@
+services:
+  web:
+    build: .
+    container_name: recetas-app
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=sqlite:///./data/recetas.db
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
